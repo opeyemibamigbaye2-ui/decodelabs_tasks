@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vault</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f3f4f6;
+            margin: 0;
+            padding: 20px;
+            color: #111827;
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        .wrap {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            margin: 4px 0 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        button {
+            padding: 7px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            background: #2563eb;
+            color: #fff;
+            margin-right: 4px;
+        }
+
+        button.grey {
+            background: #6b7280;
+        }
+
+        button.red {
+            background: #dc2626;
+        }
+
+        button.green {
+            background: #059669;
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .row:last-child {
+            border-bottom: none;
+        }
+
+        .small {
+            color: #6b7280;
+            font-size: 13px;
+        }
+
+        .msg {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .msg.ok {
+            background: #d1fae5;
+            color: #065f46;
+            display: block;
+        }
+
+        .msg.err {
+            background: #fee2e2;
+            color: #991b1b;
+            display: block;
+        }
+
+        .note {
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .note:last-child {
+            border-bottom: none;
+        }
+
+        .selected {
+            background: #eff6ff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <h1>Vault</h1>
+        <div id="msg" class="msg"></div>
+
+        <div class="card">
+            <h2 id="userFormTitle">Add a user</h2>
+            <label>Name</label>
+            <input id="userName" type="text">
+            <label>Email</label>
+            <input id="userEmail" type="text">
+            <label>Age</label>
+            <input id="userAge" type="number">
+            <button id="userSave">Save user</button>
+            <button id="userCancel" class="grey" style="display:none;">Cancel edit</button>
+        </div>
+
+        <div class="card">
+            <h2>Users</h2>
+            <div id="userList"></div>
+        </div>
+
+        <div class="card" id="notesCard" style="display:none;">
+            <h2 id="notesTitle">Notes</h2>
+            <label>Title</label>
+            <input id="noteTitle" type="text">
+            <label>Content</label>
+            <textarea id="noteContent" rows="3"></textarea>
+            <button id="noteSave" class="green">Save note</button>
+            <button id="noteCancel" class="grey" style="display:none;">Cancel edit</button>
+            <div id="noteList" style="margin-top:16px;"></div>
+        </div>
+    </div>
+
+    <script>
+        var selectedUserId = null;
+        var selectedUserName = '';
+        var editingUserId = null;
+        var editingNoteId = null;
+
+        function el(id) { return document.getElementById(id); }
+
+        function showMessage(text, isError) {
+            var box = el('msg');
+            box.textContent = text;
+            box.className = 'msg ' + (isError ? 'err' : 'ok');
+        }
+
+        function api(method, url, body) {
+            var opts = { method: method, headers: {} };
+            if (body !== undefined) {
+                opts.headers['Content-Type'] = 'application/json';
+                opts.body = JSON.stringify(body);
+            }
+            return fetch(url, opts).then(function (res) {
+                return res.text().then(function (text) {
+                    var data = null;
+                    try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+                    if (!res.ok) {
+                        var msg = 'Request failed (' + res.status + ')';
+                        if (data && Array.isArray(data.errors)) { msg = data.errors.join(', '); }
+                        else if (data && data.error) { msg = String(data.error); }
+                        else if (data && data.message) { msg = String(data.message); }
+                        throw new Error(msg);
+                    }
+                    return data;
+                });
+            });
+        }
+
+        function makeButton(label, cls, handler) {
+            var b = document.createElement('button');
+            b.textContent = label;
+            if (cls) { b.className = cls; }
+            b.addEventListener('click', handler);
+            return b;
+        }
+
+        /* ---------- USERS ---------- */
+
+        function loadUsers() {
+            api('GET', '/users').then(function (data) {
+                var users = Array.isArray(data) ? data : ((data && data.users) || []);
+                var list = el('userList');
+                list.innerHTML = '';
+                if (users.length === 0) {
+                    list.textContent = 'No users yet.';
+                    return;
+                }
+                users.forEach(function (u) {
+                    var row = document.createElement('div');
+                    row.className = 'row' + (u.id === selectedUserId ? ' selected' : '');
+
+                    var info = document.createElement('div');
+                    var name = document.createElement('strong');
+                    name.textContent = u.name;
+                    var details = document.createElement('div');
+                    details.className = 'small';
+                    details.textContent = u.email + ' | age ' + u.age + ' | id ' + u.id;
+                    info.appendChild(name);
+                    info.appendChild(details);
+
+                    var actions = document.createElement('div');
+                    actions.appendChild(makeButton('Notes', 'green', function () { selectUser(u); }));
+                    actions.appendChild(makeButton('Edit', '', function () { startEditUser(u); }));
+                    actions.appendChild(makeButton('Delete', 'red', function () { deleteUser(u); }));
+
+                    row.appendChild(info);
+                    row.appendChild(actions);
+                    list.appendChild(row);
+                });
+            }).catch(function (err) {
+                showMessage(err.message, true);
+            });
+        }
+
+        function resetUserForm() {
+            editingUserId = null;
+            el('userName').value = '';
+            el('userEmail').value = '';
+            el('userAge').value = '';
+            el('userFormTitle').textContent = 'Add a user';
+            el('userCancel').style.display = 'none';
+        }
+
+        function startEditUser(u) {
+            editingUserId = u.id;
+            el('userName').value = u.name;
+            el('userEmail').value = u.email;
+            el('userAge').value = u.age;
+            el('userFormTitle').textContent = 'Edit user ' + u.id;
+            el('userCancel').style.display = 'inline-block';
+            window.scrollTo(0, 0);
+        }
+
+        function saveUser() {
+            var body = {
+                name: el('userName').value,
+                email: el('userEmail').value,
+                age: Number(el('userAge').value)
+            };
+            var request;
+            if (editingUserId === null) {
+                request = api('POST', '/users', body);
+            } else {
+                request = api('PUT', '/users/' + editingUserId, body);
+            }
+            request.then(function () {
+                showMessage(editingUserId === null ? 'User created.' : 'User updated.', false);
+                resetUserForm();
+                loadUsers();
+            }).catch(function (err) {
+                showMessage(err.message, true);
+            });
+        }
+
+        function deleteUser(u) {
+            if (!confirm('Delete ' + u.name + ' and all their notes?')) { return; }
+            api('DELETE', '/users/' + u.id).then(function () {
+                showMessage('User deleted.', false);
+                if (selectedUserId === u.id) {
+                    selectedUserId = null;
+                    el('notesCard').style.display = 'none';
+                }
+                loadUsers();
+            }).catch(function (err) {
+                showMessage(err.message, true);
+            });
+        }
+
+        /* ---------- NOTES ---------- */
+
+        function selectUser(u) {
+            selectedUserId = u.id;
+            selectedUserName = u.name;
+            el('notesCard').style.display = 'block';
+            el('notesTitle').textContent = 'Notes for ' + u.name;
+            resetNoteForm();
+            loadNotes();
+            loadUsers();
+        }
+
+        function loadNotes() {
+            api('GET', '/users/' + selectedUserId + '/notes').then(function (data) {
+                var notes = Array.isArray(data) ? data : ((data && data.notes) || []);
+                var list = el('noteList');
+                list.innerHTML = '';
+                if (notes.length === 0) {
+                    list.textContent = 'No notes yet.';
+                    return;
+                }
+                notes.forEach(function (n) {
+                    var box = document.createElement('div');
+                    box.className = 'note';
+
+                    var title = document.createElement('strong');
+                    title.textContent = n.title;
+                    var content = document.createElement('div');
+                    content.textContent = n.content || '';
+                    var meta = document.createElement('div');
+                    meta.className = 'small';
+                    meta.textContent = 'note id ' + n.id;
+
+                    var actions = document.createElement('div');
+                    actions.style.marginTop = '6px';
+                    actions.appendChild(makeButton('Edit', '', function () { startEditNote(n); }));
+                    actions.appendChild(makeButton('Delete', 'red', function () { deleteNote(n); }));
+
+                    box.appendChild(title);
+                    box.appendChild(content);
+                    box.appendChild(meta);
+                    box.appendChild(actions);
+                    list.appendChild(box);
+                });
+            }).catch(function (err) {
+                showMessage(err.message, true);
+            });
+        }
+
+        function resetNoteForm() {
+            editingNoteId = null;
+            el('noteTitle').value = '';
+            el('noteContent').value = '';
+            el('noteCancel').style.display = 'none';
+        }
+
+        function startEditNote(n) {
+            editingNoteId = n.id;
+            el('noteTitle').value = n.title;
+            el('noteContent').value = n.content || '';
+            el('noteCancel').style.display = 'inline-block';
+        }
+
+        function saveNote() {
+            var body = { title: el('noteTitle').value, content: el('noteContent').value };
+            var request;
+            if (editingNoteId === null) {
+                request = api('POST', '/users/' + selectedUserId + '/notes', body);
+            } else {
+                request = api('PUT', '/notes/' + editingNoteId, body);
+            }
+            request.then(function () {
+                showMessage(editingNoteId === null ? 'Note created.' : 'Note updated.', false);
+                resetNoteForm();
+                loadNotes();
+            }).catch(function (err) {
+                showMessage(err.message, true);
+            });
+        }
+
+        function deleteNote(n) {
+            if (!confirm('Delete this note?')) { return; }
+            api('DELETE', '/notes/' + n.id).then(function () {
+                showMessage('Note deleted.', false);
+                loadNotes();
+            }).catch(function (err) {
+                showMessage(err.message, true);
+            });
+        }
+
+        /* ---------- START ---------- */
+
+        el('userSave').addEventListener('click', saveUser);
+        el('userCancel').addEventListener('click', resetUserForm);
+        el('noteSave').addEventListener('click', saveNote);
+        el('noteCancel').addEventListener('click', resetNoteForm);
+        loadUsers();
+    </script>
+</body>
+
+</html>
